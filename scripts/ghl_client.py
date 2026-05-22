@@ -69,14 +69,15 @@ class GHLClient:
         data = self._get(f"locations/{self.location_id}/customFields")
         return data.get("customFields", [])
 
-    def ensure_custom_field(self, name, field_key):
-        """Return the ID of a TEXT custom field, creating it if needed."""
+    def ensure_custom_field(self, name, field_key=None):
+        """Return the ID of a TEXT custom field, creating it if needed.
+        Searches by name first (GHL auto-generates the actual fieldKey, so matching
+        by name is more reliable than matching by the key we originally requested)."""
         for field in self.get_custom_fields():
-            if field["fieldKey"] == field_key:
+            if field["name"] == name:
                 return field["id"]
         result = self._post(f"locations/{self.location_id}/customFields", {
             "name": name,
-            "fieldKey": field_key,
             "dataType": "TEXT",
             "model": "contact",
         })

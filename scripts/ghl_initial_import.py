@@ -115,9 +115,7 @@ def main():
 
     if not dry_run:
         print("  Ensuring 'FR Customer ID' custom field exists in GHL...")
-        fr_id_field_id = ghl.ensure_custom_field(
-            FR_CUSTOMER_ID_FIELD_NAME, FR_CUSTOMER_ID_FIELD_KEY
-        )
+        fr_id_field_id = ghl.ensure_custom_field(FR_CUSTOMER_ID_FIELD_NAME)
         print(f"  Custom field ready (ID: {fr_id_field_id})")
     else:
         fr_id_field_id = "DRY_RUN_FIELD_ID"
