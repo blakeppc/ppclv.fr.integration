@@ -101,6 +101,100 @@ def save_checkpoint(data):
         json.dump(data, f)
 
 
+def log_duplicate(fr_id, name, email, phone, matched_on, office_num):
+    """Append a row to the duplicates CSV for manual review."""
+    os.makedirs("logs", exist_ok=True)
+    write_header = not os.path.exists(DUPLICATES_FILE)
+    with open(DUPLICATES_FILE, "a", newline="") as f:
+        w = csv.writer(f)
+        if write_header:
+            w.writerow(["fr_id", "name", "email", "phone", "matched_on", "office"])
+        w.writerow([fr_id, name, email, phone, matched_on, office_num])
+
+
+def ghl_create_with_retry(ghl, payload, office_num, fr_id, log_entries, total_stats):
+    """
+    Create a GHL contact, handling:
+    - 429 rate limit: wait 65s and retry
+    - 400/422 duplicate email: strip email, retry, log to CSV
+    - 400/422 duplicate phone: strip phone, retry, log to CSV
+    Returns (contact, action) or raises if unrecoverable.
+    """
+    import requests as _req
+
+    def _attempt(p):
+        resp = ghl.session.post(
+            f"{ghl.BASE_URL}/contacts/",
+            json={**p, "locationId": ghl.location_id},
+        )
+        return resp
+
+    resp = _attempt(payload)
+
+    # Handle 429 rate limit with one retry
+    if resp.status_code == 429:
+        print(f"  GHL rate limit — waiting 65s then retrying...")
+        time.sleep(65)
+        resp = _attempt(payload)
+
+    if resp.ok:
+        return resp.json().get("contact"), "created"
+
+    # Parse error body
+    try:
+        body = resp.json()
+    except Exception:
+        body = {}
+
+    msg = body.get("message", "")
+    matched_on = body.get("meta", {}).get("matchingField")  # "email" or "phone"
+    name = f"{payload.get('firstName', '')} {payload.get('lastName', '')}".strip()
+
+    if resp.status_code in (400, 422) and "does not allow duplicated" in msg and matched_on in ("email", "phone"):
+        # Strip the duplicate field and retry
+        retry = {k: v for k, v in payload.items() if k != matched_on}
+        retry["tags"] = retry.get("tags", []) + [f"fr_duplicate_{matched_on}"]
+        resp2 = _attempt(retry)
+
+        if resp2.status_code == 429:
+            print(f"  GHL rate limit on retry — waiting 65s...")
+            time.sleep(65)
+            resp2 = _attempt(retry)
+
+        if resp2.ok:
+            log_duplicate(fr_id, name, payload.get("email", ""), payload.get("phone", ""), matched_on, office_num)
+            return resp2.json().get("contact"), f"created_no_{matched_on}"
+
+        # Second attempt also blocked — strip the other field too if possible
+        try:
+            body2 = resp2.json()
+        except Exception:
+            body2 = {}
+        matched_on2 = body2.get("meta", {}).get("matchingField")
+        if matched_on2 and matched_on2 != matched_on:
+            retry2 = {k: v for k, v in retry.items() if k != matched_on2}
+            retry2["tags"] = retry2.get("tags", []) + [f"fr_duplicate_{matched_on2}"]
+            resp3 = _attempt(retry2)
+            if resp3.ok:
+                log_duplicate(fr_id, name, payload.get("email", ""), payload.get("phone", ""), "email+phone", office_num)
+                return resp3.json().get("contact"), "created_no_email_no_phone"
+
+        log_duplicate(fr_id, name, payload.get("email", ""), payload.get("phone", ""), "unresolved", office_num)
+        raise _req.exceptions.HTTPError(f"Could not create after stripping duplicate fields", response=resp2)
+
+    elif resp.status_code == 422 and payload.get("email"):
+        # Invalid email format — strip and retry with phone only
+        retry = {k: v for k, v in payload.items() if k != "email"}
+        retry["tags"] = retry.get("tags", []) + ["fr_invalid_email"]
+        log_duplicate(fr_id, name, payload.get("email", ""), payload.get("phone", ""), "invalid_email", office_num)
+        if retry.get("phone"):
+            resp2 = _attempt(retry)
+            if resp2.ok:
+                return resp2.json().get("contact"), "created_no_email"
+
+    resp.raise_for_status()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -203,36 +297,9 @@ def main():
                     })
                 else:
                     try:
-                        # Initial import: create directly (no pre-search needed since GHL starts empty).
-                        try:
-                            contact = ghl.create_contact(payload)
-                            action = "created"
-                        except Exception as create_err:
-                            # 422 = GHL rejected the contact, most likely a duplicate email.
-                            # Retry without the email so the contact still gets into GHL,
-                            # tagged for manual review.
-                            if "422" in str(create_err) and payload.get("email"):
-                                dupe_email = payload.pop("email")
-                                payload["tags"] = payload.get("tags", []) + ["fr_duplicate_email"]
-                                contact = ghl.create_contact(payload)
-                                action = "created_no_email"
-                                # Log to duplicates CSV for manual review
-                                os.makedirs("logs", exist_ok=True)
-                                write_header = not os.path.exists(DUPLICATES_FILE)
-                                with open(DUPLICATES_FILE, "a", newline="") as f:
-                                    w = csv.writer(f)
-                                    if write_header:
-                                        w.writerow(["fr_id", "name", "email", "phone", "office"])
-                                    w.writerow([
-                                        fr_id,
-                                        f"{payload.get('firstName', '')} {payload.get('lastName', '')}".strip(),
-                                        dupe_email,
-                                        payload.get("phone", ""),
-                                        office_num,
-                                    ])
-                            else:
-                                raise
-
+                        contact, action = ghl_create_with_retry(
+                            ghl, payload, office_num, fr_id, log_entries, total_stats
+                        )
                         total_stats[action] = total_stats.get(action, 0) + 1
                         already_imported.add(fr_id)
                         log_entries.append({
