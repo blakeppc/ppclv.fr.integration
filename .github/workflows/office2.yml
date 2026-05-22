@@ -15,6 +15,8 @@ jobs:
       FR_OFFICE2_SUBDOMAIN: ${{ secrets.FR_OFFICE2_SUBDOMAIN }}
       FR_OFFICE2_KEY: ${{ secrets.FR_OFFICE2_KEY }}
       FR_OFFICE2_TOKEN: ${{ secrets.FR_OFFICE2_TOKEN }}
+      GHL_API_TOKEN: ${{ secrets.GHL_API_TOKEN }}
+      GHL_LOCATION_ID: ${{ secrets.GHL_LOCATION_ID }}
 
     steps:
       - name: Check out code
@@ -30,3 +32,6 @@ jobs:
 
       - name: Test API connection
         run: python3 scripts/test_connection.py
+
+      - name: GHL daily sync — Office 2
+        run: python3 scripts/ghl_sync_office2.py
