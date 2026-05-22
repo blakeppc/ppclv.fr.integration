@@ -13,7 +13,9 @@ Resume an interrupted run (skips already-imported customers):
   (the checkpoint file is saved automatically as you go)
 """
 import os
+import re
 import sys
+import csv
 import json
 import time
 import argparse
@@ -31,6 +33,7 @@ from scripts.ghl_client import client_from_env as ghl_from_env, format_phone
 
 CHECKPOINT_FILE = "logs/ghl_import_checkpoint.json"
 LOG_FILE = "logs/ghl_import_log.json"
+DUPLICATES_FILE = "logs/ghl_import_duplicates.csv"
 
 FR_CUSTOMER_ID_FIELD_KEY = "contact.fr_customer_id"
 FR_CUSTOMER_ID_FIELD_NAME = "FR Customer ID"
@@ -50,7 +53,11 @@ def build_ghl_payload(customer, office_num, fr_id_field_id):
     ]
 
     phone = format_phone(customer.get("phone1")) or format_phone(customer.get("phone2"))
-    email = (customer.get("email") or "").strip().lower() or None
+
+    # Some FR accounts store two emails separated by ";" or ",". GHL only accepts one.
+    raw_email = (customer.get("email") or "").strip()
+    first_email = re.split(r"[;,]", raw_email)[0].strip().lower()
+    email = first_email if first_email else None
 
     payload = {
         "firstName": (customer.get("fname") or "").strip(),
@@ -196,15 +203,33 @@ def main():
                     })
                 else:
                     try:
-                        # Initial import: GHL is empty so create directly (no search needed).
-                        # If GHL rejects due to a duplicate, fall back to upsert.
+                        # Initial import: create directly (no pre-search needed since GHL starts empty).
                         try:
                             contact = ghl.create_contact(payload)
                             action = "created"
                         except Exception as create_err:
-                            err_text = str(create_err)
-                            if "duplicate" in err_text.lower() or "already exist" in err_text.lower() or "422" in err_text or "400" in err_text:
-                                contact, action = ghl.upsert_contact(payload)
+                            # 422 = GHL rejected the contact, most likely a duplicate email.
+                            # Retry without the email so the contact still gets into GHL,
+                            # tagged for manual review.
+                            if "422" in str(create_err) and payload.get("email"):
+                                dupe_email = payload.pop("email")
+                                payload["tags"] = payload.get("tags", []) + ["fr_duplicate_email"]
+                                contact = ghl.create_contact(payload)
+                                action = "created_no_email"
+                                # Log to duplicates CSV for manual review
+                                os.makedirs("logs", exist_ok=True)
+                                write_header = not os.path.exists(DUPLICATES_FILE)
+                                with open(DUPLICATES_FILE, "a", newline="") as f:
+                                    w = csv.writer(f)
+                                    if write_header:
+                                        w.writerow(["fr_id", "name", "email", "phone", "office"])
+                                    w.writerow([
+                                        fr_id,
+                                        f"{payload.get('firstName', '')} {payload.get('lastName', '')}".strip(),
+                                        dupe_email,
+                                        payload.get("phone", ""),
+                                        office_num,
+                                    ])
                             else:
                                 raise
 
@@ -220,7 +245,7 @@ def main():
                         total_stats["errors"] += 1
                         err_msg = str(e)
                         log_entries.append({"fr_id": fr_id, "action": "error", "error": err_msg})
-                        if total_stats["errors"] <= 3:
+                        if total_stats["errors"] <= 5:
                             print(f"  ERROR (fr_id={fr_id}): {err_msg}")
 
                 processed += 1
@@ -245,11 +270,14 @@ def main():
     print(f"\n{'=' * 65}")
     print("Import Complete" if not dry_run else "Dry Run Complete")
     print(f"{'=' * 65}")
-    print(f"  {'Would create' if dry_run else 'Created'}:    {total_stats['created']:,}")
+    print(f"  {'Would create' if dry_run else 'Created'}:              {total_stats['created']:,}")
     if not dry_run:
-        print(f"  Updated:     {total_stats.get('updated', 0):,}")
-    print(f"  No contact info (skipped): {total_stats['skipped_no_contact']:,}")
-    print(f"  Errors:      {total_stats['errors']:,}")
+        print(f"  Created (duplicate email — phone only): {total_stats.get('created_no_email', 0):,}")
+        print(f"  Updated:                        {total_stats.get('updated', 0):,}")
+    print(f"  No contact info (skipped):      {total_stats['skipped_no_contact']:,}")
+    print(f"  Errors:                         {total_stats['errors']:,}")
+    if not dry_run and total_stats.get('created_no_email', 0) > 0:
+        print(f"\n  Duplicate email log: {DUPLICATES_FILE}")
 
     if not dry_run:
         os.makedirs("logs", exist_ok=True)
