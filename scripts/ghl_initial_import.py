@@ -196,7 +196,18 @@ def main():
                     })
                 else:
                     try:
-                        contact, action = ghl.upsert_contact(payload)
+                        # Initial import: GHL is empty so create directly (no search needed).
+                        # If GHL rejects due to a duplicate, fall back to upsert.
+                        try:
+                            contact = ghl.create_contact(payload)
+                            action = "created"
+                        except Exception as create_err:
+                            err_text = str(create_err)
+                            if "duplicate" in err_text.lower() or "already exist" in err_text.lower() or "422" in err_text or "400" in err_text:
+                                contact, action = ghl.upsert_contact(payload)
+                            else:
+                                raise
+
                         total_stats[action] = total_stats.get(action, 0) + 1
                         already_imported.add(fr_id)
                         log_entries.append({
@@ -204,10 +215,13 @@ def main():
                             "ghl_id": contact.get("id") if contact else None,
                             "action": action,
                         })
-                        time.sleep(0.25)  # ~4 contacts/sec to stay well under GHL rate limits
+                        time.sleep(0.3)
                     except Exception as e:
                         total_stats["errors"] += 1
-                        log_entries.append({"fr_id": fr_id, "action": "error", "error": str(e)})
+                        err_msg = str(e)
+                        log_entries.append({"fr_id": fr_id, "action": "error", "error": err_msg})
+                        if total_stats["errors"] <= 3:
+                            print(f"  ERROR (fr_id={fr_id}): {err_msg}")
 
                 processed += 1
 
