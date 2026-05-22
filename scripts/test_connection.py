@@ -4,7 +4,6 @@ Usage: python3 scripts/test_connection.py
 """
 import os
 import sys
-from datetime import datetime, timedelta
 
 try:
     from dotenv import load_dotenv
@@ -49,24 +48,29 @@ def test_office(office_num, office_info):
         print(f"  ERROR: {e}")
         return False
 
-    print(f"  Fetching a sample active subscription...")
+    print(f"  Counting active subscriptions...")
     try:
-        cutoff = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d")
-        result = client.search_subscriptions({"dateUpdated": cutoff, "active": 1})
-        sub_ids = result.get("subscriptionIDs", [])[:3]
+        result = client.search_subscriptions({"active": 1})
         sub_count = result.get("count", 0)
-        if sub_ids:
-            subs = client.get_subscriptions(sub_ids)
-            if subs:
-                s = subs[0]
-                print(f"  ✓ {sub_count:,} active subscriptions found")
-                print(f"    Sample: {s.get('serviceType')} | "
-                      f"${float(s.get('recurringCharge', 0)):.2f}/service | "
-                      f"Next: {s.get('nextService')}")
-            else:
-                print(f"  ✓ {sub_count:,} active subscriptions found (sample fetch returned no data)")
-        else:
-            print(f"  No active subscriptions found in last 60 days")
+        sub_ids = result.get("subscriptionIDs", [])
+        print(f"  ✓ {sub_count:,} active subscriptions")
+
+        # Fetch a real sample — skip orphaned records (customerID = -1)
+        sample = []
+        for chunk_start in range(0, min(200, len(sub_ids)), 50):
+            chunk = sub_ids[chunk_start:chunk_start + 50]
+            subs = client.get_subscriptions(chunk)
+            real = [s for s in subs if s.get("customerID") not in ("-1", -1) and float(s.get("recurringCharge", 0)) > 0]
+            if real:
+                sample = real
+                break
+
+        if sample:
+            s = sample[0]
+            print(f"    Sample: {s.get('serviceType')} | "
+                  f"${float(s.get('recurringCharge', 0)):.2f}/service | "
+                  f"Status: {s.get('activeText')} | "
+                  f"Next: {s.get('nextService')}")
     except Exception as e:
         print(f"  ERROR: {e}")
 
