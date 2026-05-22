@@ -1,0 +1,43 @@
+{
+  "_comment": "OFFICE 1 — Preventive Las Vegas (ppclv1.fieldroutes.com). Edit these settings to control how price increases work for Office 1. Office 2 has its own file: office2_config.json",
+
+  "increase": {
+    "type": "percentage",
+    "value": 5,
+    "_type_options": "Use 'percentage' for a % increase (e.g. 5 = 5%), or 'flat' for a flat dollar amount (e.g. 5 = add $5.00)",
+    "_value_note": "For percentage: 5 means 5%. For flat: 5 means $5.00"
+  },
+
+  "eligibility": {
+    "minimum_days_since_last_increase": 365,
+    "_note": "Only raise prices for customers who have NOT had an increase in this many days",
+    "minimum_recurring_charge": 50.00,
+    "_minimum_note": "Only raise prices on subscriptions with a recurring charge at or above this amount",
+    "service_types_to_include": [],
+    "_service_types_note": "Leave empty [] to include ALL service types, or list specific ones: ['General Pest', 'Mosquito', 'Termite']"
+  },
+
+  "notification": {
+    "notify_customer": true,
+    "days_before_increase": 30,
+    "_days_note": "Send notice this many days before the price actually changes",
+    "notification_method": "fieldroutes",
+    "_method_options": "Use 'fieldroutes' for FieldRoutes built-in messaging, or 'podium' for Podium SMS",
+    "email_subject": "Important Notice: Upcoming Service Price Adjustment",
+    "email_body": "Dear {customer_name},\n\nWe want to let you know that effective {effective_date}, your recurring service rate will be adjusted from ${old_price:.2f} to ${new_price:.2f} per service.\n\nThis adjustment reflects increased costs in labor, materials, and fuel. We remain committed to providing you with the best pest control service in the area.\n\nIf you have any questions, please don't hesitate to call us.\n\nThank you for your continued business!\n\n{company_name}"
+  },
+
+  "account_notation": {
+    "add_note_to_account": true,
+    "note_template": "PRICE INCREASE: Recurring charge updated from ${old_price:.2f} to ${new_price:.2f} on {date}. Customer notified {days_before} days prior.",
+    "add_note_to_next_service": true,
+    "service_note_template": "Price increase effective this service: ${old_price:.2f} → ${new_price:.2f}"
+  },
+
+  "safety": {
+    "dry_run": true,
+    "_dry_run_note": "IMPORTANT: When true, the script shows what it WOULD do but makes NO changes. Set to false only when ready to run live.",
+    "max_customers_per_run": 50,
+    "_max_note": "Safety limit — never process more than this many customers in one run. Increase if needed."
+  }
+}

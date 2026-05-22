@@ -1,0 +1,18 @@
+# Environment variables (NEVER commit these)
+.env
+.env.local
+
+# Logs
+logs/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# macOS
+.DS_Store
