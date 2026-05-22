@@ -1,0 +1,32 @@
+name: Office 2 — Preventive Pest Control Commercial
+
+on:
+  schedule:
+    # Runs at 9am Mountain Time on the 1st of every month
+    - cron: "0 16 1 * *"
+  workflow_dispatch:  # ← "Run workflow" button for manual runs
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      FR_OFFICE2_SUBDOMAIN: ${{ secrets.FR_OFFICE2_SUBDOMAIN }}
+      FR_OFFICE2_KEY: ${{ secrets.FR_OFFICE2_KEY }}
+      FR_OFFICE2_TOKEN: ${{ secrets.FR_OFFICE2_TOKEN }}
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Test API connection
+        run: python3 scripts/test_connection.py
