@@ -128,6 +128,20 @@ class FieldRoutesClient:
         data = self._get("invoice", "get", {"invoiceIDs": ids})
         return data.get("invoices", [])
 
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def is_real_record(record):
+        """
+        Returns True if this record belongs to a real customer/office.
+        Filters out orphaned historical records (officeID=-1 or customerID=-1)
+        that appear in the API but are excluded from the FieldRoutes UI counts.
+        """
+        return (
+            str(record.get("officeID", "-1")) != "-1"
+            and str(record.get("customerID", "-1")) != "-1"
+        )
+
     # ── Flags / Tags ──────────────────────────────────────────────────────────
 
     def search_flags(self, filters=None):

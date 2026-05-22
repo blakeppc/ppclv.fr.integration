@@ -51,25 +51,28 @@ def test_office(office_num, office_info):
     print(f"  Counting active subscriptions...")
     try:
         result = client.search_subscriptions({"active": 1})
-        sub_count = result.get("count", 0)
         sub_ids = result.get("subscriptionIDs", [])
-        print(f"  ✓ {sub_count:,} active subscriptions")
 
-        # Fetch a real sample — skip orphaned records (customerID = -1)
-        sample = []
-        for chunk_start in range(0, min(200, len(sub_ids)), 50):
-            chunk = sub_ids[chunk_start:chunk_start + 50]
-            subs = client.get_subscriptions(chunk)
-            real = [s for s in subs if s.get("customerID") not in ("-1", -1) and float(s.get("recurringCharge", 0)) > 0]
-            if real:
-                sample = real
-                break
+        # Sample to estimate how many belong to this office (officeID != -1)
+        step = max(1, len(sub_ids) // 200)
+        sample_ids = sub_ids[::step][:200]
+        subs_sample = []
+        for i in range(0, len(sample_ids), 50):
+            subs_sample.extend(client.get_subscriptions(sample_ids[i:i+50]))
 
+        real = [s for s in subs_sample if str(s.get("officeID", "-1")) != "-1"
+                and str(s.get("customerID", "-1")) != "-1"]
+        orphaned_pct = 1 - (len(real) / len(subs_sample)) if subs_sample else 0
+        est_real = int(result.get("count", 0) * (1 - orphaned_pct))
+
+        print(f"  ✓ ~{est_real:,} active subscriptions (matching FieldRoutes UI count)")
+        print(f"    ({result.get('count'):,} total active in API; ~{int(orphaned_pct*100)}% are orphaned historical records excluded from UI)")
+
+        sample = [s for s in real if float(s.get("recurringCharge", 0)) > 0]
         if sample:
             s = sample[0]
             print(f"    Sample: {s.get('serviceType')} | "
                   f"${float(s.get('recurringCharge', 0)):.2f}/service | "
-                  f"Status: {s.get('activeText')} | "
                   f"Next: {s.get('nextService')}")
     except Exception as e:
         print(f"  ERROR: {e}")
