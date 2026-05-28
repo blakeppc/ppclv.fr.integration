@@ -1,0 +1,45 @@
+name: BigQuery Daily Sync
+
+on:
+  schedule:
+    # Runs at 3:00 AM UTC daily (8pm MT / 7pm PT)
+    # Runs after all field work is done for the day
+    - cron: "0 3 * * *"
+  workflow_dispatch:  # ← "Run workflow" button for manual runs
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45   # Daily sync should finish well under 30 min
+
+    env:
+      # FieldRoutes — both offices
+      FR_OFFICE1_SUBDOMAIN: ${{ secrets.FR_OFFICE1_SUBDOMAIN }}
+      FR_OFFICE1_KEY:       ${{ secrets.FR_OFFICE1_KEY }}
+      FR_OFFICE1_TOKEN:     ${{ secrets.FR_OFFICE1_TOKEN }}
+      FR_OFFICE2_SUBDOMAIN: ${{ secrets.FR_OFFICE2_SUBDOMAIN }}
+      FR_OFFICE2_KEY:       ${{ secrets.FR_OFFICE2_KEY }}
+      FR_OFFICE2_TOKEN:     ${{ secrets.FR_OFFICE2_TOKEN }}
+      # BigQuery
+      GCP_PROJECT_ID:       ${{ secrets.GCP_PROJECT_ID }}
+      BQ_DATASET:           fieldroutes
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-key.json
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write GCP service account key
+        # Decodes the secret and writes it to the temp file path above
+        run: echo '${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}' > /tmp/gcp-key.json
+
+      - name: BigQuery daily sync
+        run: python3 scripts/bq_daily_sync.py --days 2

@@ -2,6 +2,9 @@
 .env
 .env.local
 
+# Google Cloud service account key (NEVER commit this)
+config/gcp-service-account.json
+
 # Logs
 logs/
 *.log

@@ -94,17 +94,92 @@ class FieldRoutesClient:
             "recurringCharge": f"{new_price:.2f}",
         })
 
-    # ── Service Orders / Appointments ─────────────────────────────────────────
+    # ── Appointments (work orders / completed services) ───────────────────────
 
-    def search_service_orders(self, filters=None):
-        """Returns list of serviceOrderIDs matching filters."""
-        return self._get("serviceOrder", "search", filters)
+    def search_appointments(self, filters=None):
+        """
+        Returns list of appointmentIDs matching filters.
+        Useful date filters:
+          dateStart / dateEnd         — scheduled date range (YYYY-MM-DD)
+          dateCompletedStart/End      — completion date range
+          dateUpdatedStart/End        — last-updated range (use for daily sync)
+          officeID                    — limit to one office
+          status                      — 0=pending, 1=complete, 2=cancelled, etc.
+        """
+        return self._get("appointment", "search", filters)
 
-    def get_service_orders(self, service_order_ids):
-        """Fetches full service order records for a list of IDs."""
-        ids = ",".join(str(i) for i in service_order_ids) if isinstance(service_order_ids, list) else str(service_order_ids)
-        data = self._get("serviceOrder", "get", {"serviceOrderIDs": ids})
-        return data.get("serviceOrders", [])
+    def get_appointments(self, appointment_ids):
+        """Fetches full appointment records for a list of IDs.
+        Includes timeIn, timeOut, routeID, sequence, assignedTech, ticketID,
+        productionValue, amountCollected, reserviceReasonID, etc.
+        """
+        ids = ",".join(str(i) for i in appointment_ids) if isinstance(appointment_ids, list) else str(appointment_ids)
+        data = self._get("appointment", "get", {"appointmentIDs": ids})
+        return data.get("appointments", [])
+
+    # ── Tickets (invoices with line items) ────────────────────────────────────
+
+    def search_tickets(self, filters=None):
+        """
+        Returns list of ticketIDs matching filters.
+        Useful date filters:
+          dateStart / dateEnd         — invoice date range (YYYY-MM-DD)
+          dateCreatedStart/End        — creation date range
+          dateUpdatedStart/End        — last-updated range (use for daily sync)
+          officeID                    — limit to one office
+          active                      — 1 = active tickets only
+        """
+        return self._get("ticket", "search", filters)
+
+    def get_tickets(self, ticket_ids):
+        """Fetches full ticket records including line items.
+        The response includes an 'items' array with productID, quantity, amount
+        for each line item — used for chemical usage tracking.
+        """
+        ids = ",".join(str(i) for i in ticket_ids) if isinstance(ticket_ids, list) else str(ticket_ids)
+        data = self._get("ticket", "get", {"ticketIDs": ids})
+        return data.get("tickets", [])
+
+    # ── Service Types ─────────────────────────────────────────────────────────
+
+    def search_service_types(self, filters=None):
+        """Returns list of service type IDs. Key: 'serviceTypeIDs' in response."""
+        return self._get("serviceType", "search", filters)
+
+    def get_service_types(self, type_ids):
+        """Fetches full service type records.
+        NOTE: GET parameter is 'typeIDs' (not 'serviceTypeIDs').
+        Includes reservice, initial, regularService, frequency, defaultCharge.
+        """
+        ids = ",".join(str(i) for i in type_ids) if isinstance(type_ids, list) else str(type_ids)
+        data = self._get("serviceType", "get", {"typeIDs": ids})
+        return data.get("serviceTypes", [])
+
+    # ── Employees ─────────────────────────────────────────────────────────────
+
+    def search_employees(self, filters=None):
+        """Returns list of employeeIDs matching filters.
+        Pass active=1 to get only active employees.
+        """
+        return self._get("employee", "search", filters)
+
+    def get_employees(self, employee_ids):
+        """Fetches full employee records (name, initials, office, type, etc.)."""
+        ids = ",".join(str(i) for i in employee_ids) if isinstance(employee_ids, list) else str(employee_ids)
+        data = self._get("employee", "get", {"employeeIDs": ids})
+        return data.get("employees", [])
+
+    # ── Products (chemicals / materials) ──────────────────────────────────────
+
+    def search_products(self, filters=None):
+        """Returns list of productIDs matching filters."""
+        return self._get("product", "search", filters)
+
+    def get_products(self, product_ids):
+        """Fetches full product records (description, code, category, unit cost)."""
+        ids = ",".join(str(i) for i in product_ids) if isinstance(product_ids, list) else str(product_ids)
+        data = self._get("product", "get", {"productIDs": ids})
+        return data.get("products", [])
 
     # ── Notes ─────────────────────────────────────────────────────────────────
 
@@ -116,17 +191,7 @@ class FieldRoutesClient:
             "date": datetime.now().strftime("%Y-%m-%d"),
         })
 
-    # ── Invoices ──────────────────────────────────────────────────────────────
-
-    def search_invoices(self, filters=None):
-        """Returns list of invoiceIDs matching filters."""
-        return self._get("invoice", "search", filters)
-
-    def get_invoices(self, invoice_ids):
-        """Fetches full invoice records for a list of IDs."""
-        ids = ",".join(str(i) for i in invoice_ids) if isinstance(invoice_ids, list) else str(invoice_ids)
-        data = self._get("invoice", "get", {"invoiceIDs": ids})
-        return data.get("invoices", [])
+    # ── Flags / Tags ──────────────────────────────────────────────────────────
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -153,3 +218,13 @@ class FieldRoutesClient:
         ids = ",".join(str(i) for i in flag_ids) if isinstance(flag_ids, list) else str(flag_ids)
         data = self._get("genericFlag", "get", {"genericFlagIDs": ids})
         return data.get("genericFlags", [])
+
+    # ── Legacy aliases (kept for backwards compatibility) ─────────────────────
+
+    def search_invoices(self, filters=None):
+        """Alias for search_tickets (legacy name)."""
+        return self.search_tickets(filters)
+
+    def get_invoices(self, invoice_ids):
+        """Alias for get_tickets (legacy name)."""
+        return self.get_tickets(invoice_ids)
