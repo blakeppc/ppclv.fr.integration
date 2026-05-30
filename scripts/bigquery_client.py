@@ -84,132 +84,139 @@ class BQClient:
     def now_utc():
         return datetime.now(timezone.utc).isoformat()
 
+    # ── Shared type-safe helpers ──────────────────────────────────────────────
+    # The FR API sometimes returns "" (empty string) for numeric fields.
+    # bare int("") / float("") crash with ValueError — these helpers return a
+    # safe default instead so a single bad record never kills the whole batch.
+
+    @staticmethod
+    def _int(val, default=None):
+        """int() that gracefully handles None, '', and non-numeric strings."""
+        if val is None or val == "":
+            return default
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _float(val, default=None):
+        """float() that gracefully handles None, '', and non-numeric strings."""
+        if val is None or val == "":
+            return default
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _date(val):
+        """Return YYYY-MM-DD string or None; filters out 0000-00-00 placeholders."""
+        if not val or str(val).startswith("0000"):
+            return None
+        return str(val)[:10]
+
+    @staticmethod
+    def _ts(val):
+        """Return ISO-ish timestamp string or None; filters out 0000-... placeholders."""
+        if not val or str(val).startswith("0000"):
+            return None
+        return str(val).replace(" ", "T")
+
     # ── Row builders ──────────────────────────────────────────────────────────
 
     def service_type_row(self, st):
         name = st.get("description", "")
         return {
-            "type_id": int(st.get("typeID", 0)),
-            "description": name,
-            "office_id": int(st.get("officeID", -1)),
-            "reservice": st.get("reservice") == "1",
-            "initial": st.get("initial") == "1",
-            "regular_service": st.get("regularService") == "1",
-            "frequency": int(st.get("frequency", -1)),
-            "billing_frequency": int(st.get("billingFrequency", -1)),
-            "default_charge": float(st.get("defaultCharge") or 0),
-            "category": st.get("category", ""),
-            "is_inspection": name in self.INSPECTION_NAMES,
-            "loaded_at": self.now_utc(),
+            "type_id":           self._int(st.get("typeID"), 0),
+            "description":       name,
+            "office_id":         self._int(st.get("officeID"), -1),
+            "reservice":         st.get("reservice") == "1",
+            "initial":           st.get("initial") == "1",
+            "regular_service":   st.get("regularService") == "1",
+            "frequency":         self._int(st.get("frequency"), -1),
+            "billing_frequency": self._int(st.get("billingFrequency"), -1),
+            "default_charge":    self._float(st.get("defaultCharge"), 0),
+            "category":          st.get("category", ""),
+            "is_inspection":     name in self.INSPECTION_NAMES,
+            "loaded_at":         self.now_utc(),
         }
 
     def employee_row(self, emp):
         return {
-            "employee_id": int(emp.get("employeeID", 0)),
-            "first_name": (emp.get("fname") or "").strip(),
-            "last_name": (emp.get("lname") or "").strip(),
-            "nickname": (emp.get("nickname") or "").strip(),
-            "initials": (emp.get("initials") or "").strip(),
-            "office_id": int(emp.get("officeID", -1)),
-            "emp_type": int(emp.get("type", 0)),
-            "active": emp.get("active") == "1",
-            "email": (emp.get("email") or "").strip(),
-            "loaded_at": self.now_utc(),
+            "employee_id": self._int(emp.get("employeeID"), 0),
+            "first_name":  (emp.get("fname") or "").strip(),
+            "last_name":   (emp.get("lname") or "").strip(),
+            "nickname":    (emp.get("nickname") or "").strip(),
+            "initials":    (emp.get("initials") or "").strip(),
+            "office_id":   self._int(emp.get("officeID"), -1),
+            "emp_type":    self._int(emp.get("type"), 0),
+            "active":      emp.get("active") == "1",
+            "email":       (emp.get("email") or "").strip(),
+            "loaded_at":   self.now_utc(),
         }
 
     def product_row(self, p):
         return {
-            "product_id": int(p.get("productID", 0)),
+            "product_id":  self._int(p.get("productID"), 0),
             "description": (p.get("description") or "").strip(),
-            "code": (p.get("code") or "").strip(),
-            "category": (p.get("category") or "").strip(),
-            "unit_cost": float(p.get("amount") or 0),
-            "office_id": int(p.get("officeID", -1)),
-            "taxable": p.get("taxable") == "1",
-            "loaded_at": self.now_utc(),
+            "code":        (p.get("code") or "").strip(),
+            "category":    (p.get("category") or "").strip(),
+            "unit_cost":   self._float(p.get("amount"), 0),
+            "office_id":   self._int(p.get("officeID"), -1),
+            "taxable":     p.get("taxable") == "1",
+            "loaded_at":   self.now_utc(),
         }
 
     def customer_row(self, c):
-        def _date(val):
-            if not val or str(val).startswith("0000"):
-                return None
-            return str(val)[:10]
-
         return {
-            "customer_id": int(c.get("customerID", 0)),
-            "first_name": (c.get("fname") or "").strip(),
-            "last_name": (c.get("lname") or "").strip(),
-            "company_name": (c.get("companyName") or "").strip(),
-            "email": (c.get("email") or "").strip().lower(),
-            "phone1": (c.get("phone1") or "").strip(),
-            "address": (c.get("address") or "").strip(),
-            "city": (c.get("city") or "").strip(),
-            "state": (c.get("state") or "").strip(),
-            "zip": (c.get("zip") or "").strip(),
-            "office_id": int(c.get("officeID", -1)),
-            "active": str(c.get("active", "0")) == "1",
-            "commercial_account": str(c.get("commercialAccount", "0")) == "1",
-            "date_added": _date(c.get("dateAdded")),
-            "date_cancelled": _date(c.get("dateCancelled")),
-            "source": (c.get("source") or "").strip(),
-            "loaded_at": self.now_utc(),
+            "customer_id":       self._int(c.get("customerID"), 0),
+            "first_name":        (c.get("fname") or "").strip(),
+            "last_name":         (c.get("lname") or "").strip(),
+            "company_name":      (c.get("companyName") or "").strip(),
+            "email":             (c.get("email") or "").strip().lower(),
+            "phone1":            (c.get("phone1") or "").strip(),
+            "address":           (c.get("address") or "").strip(),
+            "city":              (c.get("city") or "").strip(),
+            "state":             (c.get("state") or "").strip(),
+            "zip":               (c.get("zip") or "").strip(),
+            "office_id":         self._int(c.get("officeID"), -1),
+            "active":            str(c.get("active", "0")) == "1",
+            "commercial_account":str(c.get("commercialAccount", "0")) == "1",
+            "date_added":        self._date(c.get("dateAdded")),
+            "date_cancelled":    self._date(c.get("dateCancelled")),
+            "source":            (c.get("source") or "").strip(),
+            "loaded_at":         self.now_utc(),
         }
 
     def subscription_row(self, s):
-        def _date(val):
-            if not val or str(val).startswith("0000"):
-                return None
-            return str(val)[:10]
-
         return {
-            "subscription_id": int(s.get("subscriptionID", 0)),
-            "customer_id": int(s.get("customerID", 0)),
-            "office_id": int(s.get("officeID", -1)),
-            "service_type_id": int(s.get("serviceID", 0)),
-            "service_type": (s.get("serviceType") or "").strip(),
-            "recurring_charge": float(s.get("recurringCharge") or 0),
-            "initial_charge": float(s.get("initialCharge") or 0),
-            "frequency": int(s.get("frequency", 0)),
-            "next_service": _date(s.get("nextService")),
-            "last_service": _date(s.get("lastService")),
-            "date_added": _date(s.get("dateAdded")),
-            "date_cancelled": _date(s.get("dateCancelled")),
-            "active": str(s.get("active", "0")) == "1",
-            "loaded_at": self.now_utc(),
+            "subscription_id": self._int(s.get("subscriptionID"), 0),
+            "customer_id":     self._int(s.get("customerID"), 0),
+            "office_id":       self._int(s.get("officeID"), -1),
+            "service_type_id": self._int(s.get("serviceID"), 0),
+            "service_type":    (s.get("serviceType") or "").strip(),
+            "recurring_charge":self._float(s.get("recurringCharge"), 0),
+            "initial_charge":  self._float(s.get("initialCharge"), 0),
+            "frequency":       self._int(s.get("frequency"), 0),
+            "next_service":    self._date(s.get("nextService")),
+            "last_service":    self._date(s.get("lastService")),
+            "date_added":      self._date(s.get("dateAdded")),
+            "date_cancelled":  self._date(s.get("dateCancelled")),
+            "active":          str(s.get("active", "0")) == "1",
+            "loaded_at":       self.now_utc(),
         }
 
     def appointment_row(self, a):
-        def _ts(val):
-            if not val or str(val).startswith("0000"):
-                return None
-            return str(val).replace(" ", "T")
-
-        def _date(val):
-            if not val or str(val).startswith("0000"):
-                return None
-            return str(val)[:10]
-
-        def _float(val, default=None):
-            try:
-                return float(val) if val is not None else default
-            except (TypeError, ValueError):
-                return default
-
-        def _int(val, default=None):
-            try:
-                return int(val) if val is not None else default
-            except (TypeError, ValueError):
-                return default
-
         # Calculate actual duration from timeIn/timeOut
         duration_actual = None
         try:
-            if a.get("timeIn") and a.get("timeOut") and not str(a.get("timeIn","")).startswith("0000"):
+            if a.get("timeIn") and a.get("timeOut") and not str(a.get("timeIn", "")).startswith("0000"):
                 from datetime import datetime as dt
-                tin = dt.strptime(str(a["timeIn"])[:19], "%Y-%m-%d %H:%M:%S")
+                tin  = dt.strptime(str(a["timeIn"])[:19],  "%Y-%m-%d %H:%M:%S")
                 tout = dt.strptime(str(a["timeOut"])[:19], "%Y-%m-%d %H:%M:%S")
                 diff = (tout - tin).total_seconds() / 60
-                if 0 < diff < 600:  # sanity check: 0-10 hours
+                if 0 < diff < 600:  # sanity check: 0–10 hours
                     duration_actual = round(diff, 2)
         except Exception:
             pass
@@ -221,88 +228,77 @@ class BQClient:
             additional = str(additional)
 
         return {
-            "appointment_id": int(a.get("appointmentID", 0)),
-            "customer_id": _int(a.get("customerID")),
-            "subscription_id": _int(a.get("subscriptionID")),
-            "ticket_id": _int(a.get("ticketID")),
-            "office_id": _int(a.get("officeID")),
-            "route_id": _int(a.get("routeID")),
-            "sequence": _int(a.get("sequence")),
-            "assigned_tech_id": _int(a.get("assignedTech")),
-            "serviced_by_id": _int(a.get("servicedBy")),
-            "additional_tech_ids": additional,
-            "service_type_id": _int(a.get("type")),
-            "scheduled_date": _date(a.get("date")),
-            "date_completed": _ts(a.get("dateCompleted")),
-            "time_in": _ts(a.get("timeIn")),
-            "time_out": _ts(a.get("timeOut")),
-            "duration_scheduled_min": _int(a.get("duration")),
-            "duration_actual_min": duration_actual,
-            "status": _int(a.get("status")),
-            "status_text": (a.get("statusText") or "").strip(),
-            "is_initial": a.get("isInitial") == "1",
-            "production_value": _float(a.get("productionValue")),
-            "amount_collected": _float(a.get("amountCollected")),
-            "reservice_reason_id": _int(a.get("reserviceReasonID")),
-            "lat_in": _float(a.get("latIn")),
-            "lng_in": _float(a.get("longIn")),
-            "temperature": _float(a.get("temperature")),
-            "wind_speed": _float(a.get("windSpeed")),
-            "wind_direction": (a.get("windDirection") or "").strip(),
-            "date_added": _ts(a.get("dateAdded")),
-            "date_updated": _ts(a.get("dateUpdated")),
-            "loaded_at": self.now_utc(),
+            "appointment_id":        self._int(a.get("appointmentID"), 0),
+            "customer_id":           self._int(a.get("customerID")),
+            "subscription_id":       self._int(a.get("subscriptionID")),
+            "ticket_id":             self._int(a.get("ticketID")),
+            "office_id":             self._int(a.get("officeID")),
+            "route_id":              self._int(a.get("routeID")),
+            "sequence":              self._int(a.get("sequence")),
+            "assigned_tech_id":      self._int(a.get("assignedTech")),
+            "serviced_by_id":        self._int(a.get("servicedBy")),
+            "additional_tech_ids":   additional,
+            "service_type_id":       self._int(a.get("type")),
+            "scheduled_date":        self._date(a.get("date")),
+            "date_completed":        self._ts(a.get("dateCompleted")),
+            "time_in":               self._ts(a.get("timeIn")),
+            "time_out":              self._ts(a.get("timeOut")),
+            "duration_scheduled_min":self._int(a.get("duration")),
+            "duration_actual_min":   duration_actual,
+            "status":                self._int(a.get("status")),
+            "status_text":           (a.get("statusText") or "").strip(),
+            "is_initial":            a.get("isInitial") == "1",
+            "production_value":      self._float(a.get("productionValue")),
+            "amount_collected":      self._float(a.get("amountCollected")),
+            "reservice_reason_id":   self._int(a.get("reserviceReasonID")),
+            "lat_in":                self._float(a.get("latIn")),
+            "lng_in":                self._float(a.get("longIn")),
+            "temperature":           self._float(a.get("temperature")),
+            "wind_speed":            self._float(a.get("windSpeed")),
+            "wind_direction":        (a.get("windDirection") or "").strip(),
+            "date_added":            self._ts(a.get("dateAdded")),
+            "date_updated":          self._ts(a.get("dateUpdated")),
+            "loaded_at":             self.now_utc(),
         }
 
     def ticket_row(self, t):
-        def _ts(val):
-            if not val or str(val).startswith("0000"):
-                return None
-            return str(val).replace(" ", "T")
-
-        def _date(val):
-            if not val or str(val).startswith("0000"):
-                return None
-            return str(val)[:10]
-
         return {
-            "ticket_id": int(t.get("ticketID", 0)),
-            "appointment_id": int(t.get("appointmentID") or 0),
-            "customer_id": int(t.get("customerID", 0)),
-            "subscription_id": int(t.get("subscriptionID") or 0),
-            "office_id": int(t.get("officeID", -1)),
-            "service_id": int(t.get("serviceID") or 0),
-            "invoice_date": _date(t.get("invoiceDate")),
-            "date_created": _ts(t.get("dateCreated")),
-            "date_updated": _ts(t.get("dateUpdated")),
-            "subtotal": float(t.get("subTotal") or 0),
-            "tax_amount": float(t.get("taxAmount") or 0),
-            "total": float(t.get("total") or 0),
-            "balance": float(t.get("balance") or 0),
-            "production_value": float(t.get("productionValue") or 0),
-            "active": t.get("active") == "1",
-            "loaded_at": self.now_utc(),
+            "ticket_id":        self._int(t.get("ticketID"), 0),
+            "appointment_id":   self._int(t.get("appointmentID"), 0),
+            "customer_id":      self._int(t.get("customerID"), 0),
+            "subscription_id":  self._int(t.get("subscriptionID"), 0),
+            "office_id":        self._int(t.get("officeID"), -1),
+            "service_id":       self._int(t.get("serviceID"), 0),
+            "invoice_date":     self._date(t.get("invoiceDate")),
+            "date_created":     self._ts(t.get("dateCreated")),
+            "date_updated":     self._ts(t.get("dateUpdated")),
+            "subtotal":         self._float(t.get("subTotal"), 0),
+            "tax_amount":       self._float(t.get("taxAmount"), 0),
+            "total":            self._float(t.get("total"), 0),
+            "balance":          self._float(t.get("balance"), 0),
+            "production_value": self._float(t.get("productionValue"), 0),
+            "active":           t.get("active") == "1",
+            "loaded_at":        self.now_utc(),
         }
 
     def ticket_item_rows(self, t):
         """Returns one row per line item in a ticket."""
         rows = []
-        office_id = int(t.get("officeID", -1))
-        ticket_id = int(t.get("ticketID", 0))
+        office_id = self._int(t.get("officeID"), -1)
+        ticket_id = self._int(t.get("ticketID"), 0)
         for item in t.get("items", []):
             try:
-                product_id = int(item.get("productID") or 0)
                 rows.append({
-                    "item_id": int(item.get("itemID", 0)),
-                    "ticket_id": ticket_id,
-                    "office_id": office_id,
+                    "item_id":     self._int(item.get("itemID"), 0),
+                    "ticket_id":   ticket_id,
+                    "office_id":   office_id,
                     "description": (item.get("description") or "").strip(),
-                    "quantity": float(item.get("quantity") or 0),
-                    "amount": float(item.get("amount") or 0),
-                    "product_id": product_id,
-                    "service_id": int(item.get("serviceID") or 0),
-                    "taxable": item.get("taxable") == "1",
-                    "loaded_at": self.now_utc(),
+                    "quantity":    self._float(item.get("quantity"), 0),
+                    "amount":      self._float(item.get("amount"), 0),
+                    "product_id":  self._int(item.get("productID"), 0),
+                    "service_id":  self._int(item.get("serviceID"), 0),
+                    "taxable":     item.get("taxable") == "1",
+                    "loaded_at":   self.now_utc(),
                 })
             except Exception:
                 pass
