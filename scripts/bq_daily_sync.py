@@ -98,8 +98,25 @@ def sync_appointments(fr, bq, office_num, since_str):
 
 
 def sync_tickets(fr, bq, office_num, since_str):
-    """Sync tickets + items updated since since_str. Returns (ticket_count, item_count)."""
-    ticket_ids = fetch_ids_since(fr, fr.search_tickets, since_str, {}, "ticketIDs")
+    """Sync tickets for appointments updated since since_str.
+
+    NOTE: The FieldRoutes ticket search API ignores all date filters and always
+    returns the same first 50k tickets regardless of params. We instead find
+    recently-updated appointments, collect their ticket_ids, and fetch those
+    tickets directly by ID — this is the only reliable way to get current data.
+    """
+    # Find appointments updated recently
+    appt_ids = fetch_ids_since(fr, fr.search_appointments, since_str, {}, "appointmentIDs")
+    if not appt_ids:
+        return 0, 0
+
+    # Get those appointments to extract their ticket_ids
+    appointments = fetch_in_batches(fr.get_appointments, appt_ids)
+    ticket_ids = list({
+        int(a["ticketID"]) for a in appointments
+        if a.get("ticketID") and int(a.get("ticketID", 0)) > 0
+    })
+
     if not ticket_ids:
         return 0, 0
 
