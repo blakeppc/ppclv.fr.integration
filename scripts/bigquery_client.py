@@ -190,6 +190,16 @@ class BQClient:
         }
 
     def subscription_row(self, s):
+        # FR returns "CUSTOM" (a string) for subscriptions on a non-fixed schedule.
+        # These are typically billed monthly at a flat rate — the recurringCharge
+        # represents the monthly amount, not a per-visit amount.
+        # Store as -2 so views can distinguish CUSTOM from "unknown" (0 / -1).
+        raw_freq = s.get("frequency")
+        if str(raw_freq).strip().upper() == "CUSTOM":
+            frequency = -2   # sentinel: flat monthly billing, charge is already monthly
+        else:
+            frequency = self._int(raw_freq, 0)
+
         return {
             "subscription_id": self._int(s.get("subscriptionID"), 0),
             "customer_id":     self._int(s.get("customerID"), 0),
@@ -198,7 +208,7 @@ class BQClient:
             "service_type":    (s.get("serviceType") or "").strip(),
             "recurring_charge":self._float(s.get("recurringCharge"), 0),
             "initial_charge":  self._float(s.get("initialCharge"), 0),
-            "frequency":       self._int(s.get("frequency"), 0),
+            "frequency":       frequency,
             "next_service":    self._date(s.get("nextService")),
             "last_service":    self._date(s.get("lastService")),
             "date_added":      self._date(s.get("dateAdded")),
