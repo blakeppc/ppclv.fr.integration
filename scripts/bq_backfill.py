@@ -321,25 +321,39 @@ def load_month_appointments(fr, bq, office_num, year, month, call_counter):
 
 
 def load_month_tickets(fr, bq, office_num, year, month, call_counter):
-    """Load one month of tickets + line items for one office. Returns (ticket_count, item_count)."""
+    """Load tickets for appointments scheduled in this month.
+
+    NOTE: The FR ticket search API ignores all date filters and always returns
+    the same first 50k tickets regardless of date params. Using it in the
+    backfill consumed ~100 API calls per month (50k IDs / 500 per batch),
+    exhausting the 3,000/day limit and causing later months to silently load
+    0 appointments. The correct approach: collect ticket_ids from the
+    appointments we just loaded for this month, then fetch those tickets by ID.
+    """
     start_str, end_str = month_date_range(year, month)
 
-    # Search for ticket IDs in this date range
-    ticket_ids = fetch_all_ids(
-        fr,
-        fr.search_tickets,
-        {"dateStart": start_str, "dateEnd": end_str},
-        "ticketIDs",
-        call_counter,
-    )
+    # Get ticket IDs from appointments already loaded for this month/office
+    rows = bq.query(f"""
+        SELECT DISTINCT ticket_id
+        FROM `{bq.table_ref("fact_appointments")}`
+        WHERE office_id = {office_num}
+          AND scheduled_date >= '{start_str}'
+          AND scheduled_date <= '{end_str}'
+          AND ticket_id IS NOT NULL
+          AND ticket_id > 0
+    """)
+    ticket_ids = [r.ticket_id for r in rows]
 
     if not ticket_ids:
         return 0, 0
 
-    # Delete existing rows for this month (idempotent)
-    delete_month_from_bq(bq, "fact_tickets", "invoice_date", start_str, end_str)
-    delete_month_from_bq(bq, "fact_ticket_items", "loaded_at", start_str, end_str)
-    # Note: ticket_items don't have invoice_date — we use a subquery approach below
+    # Delete existing rows for these specific ticket IDs (idempotent)
+    id_list = ",".join(str(i) for i in ticket_ids)
+    try:
+        bq.query(f"DELETE FROM `{bq.table_ref('fact_tickets')}` WHERE ticket_id IN ({id_list})")
+        bq.query(f"DELETE FROM `{bq.table_ref('fact_ticket_items')}` WHERE ticket_id IN ({id_list})")
+    except Exception:
+        pass  # table may be empty on first run
 
     ticket_rows = []
     item_rows = []
