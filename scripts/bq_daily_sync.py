@@ -79,18 +79,29 @@ def bq_delete_by_ids(bq, table, id_col, ids):
 # ── Fact table sync ───────────────────────────────────────────────────────────
 
 def sync_appointments(fr, bq, office_num, since_str):
-    """Sync appointments updated since since_str. Returns row count."""
-    appt_ids = fetch_ids_since(fr, fr.search_appointments, since_str, {}, "appointmentIDs")
+    """Sync appointments added since since_str. Returns row count.
+
+    NOTE: The FieldRoutes appointment search API ignores dateUpdatedStart,
+    scheduledStart, dateCompletedStart, and status filters — all return the
+    same 50,000 oldest appointments regardless of parameters.
+
+    Workaround: use dateAddedStart, which is the only filter that works.
+    This captures new appointments. Status changes on existing appointments
+    (completions, cancellations) are indirectly captured: the ticket sync
+    pulls completed appointment revenue via the appointment→ticketID link.
+    """
+    since_date = since_str[:10]  # dateAddedStart accepts YYYY-MM-DD only
+    result = fr.search_appointments({"dateAddedStart": since_date})
+    time.sleep(SLEEP_BETWEEN_CALLS)
+    appt_ids = result.get("appointmentIDs", [])
     if not appt_ids:
         return 0
 
     appointments = fetch_in_batches(fr.get_appointments, appt_ids)
-
     rows = [bq.appointment_row(a) for a in appointments
             if str(a.get("officeID", "-1")) != "-1"]
 
     if rows:
-        # Delete old versions, then insert fresh
         bq_delete_by_ids(bq, "fact_appointments", "appointment_id", appt_ids)
         bq.load_rows("fact_appointments", rows)
 
