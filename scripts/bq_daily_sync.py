@@ -255,40 +255,54 @@ def main():
         "customers": 0, "subscriptions": 0,
     }
 
+    failed_offices = []
+
     for office_num, fr in sorted(fr_clients.items()):
         label = "Office 1 (Residential)" if office_num == 1 else "Office 2 (Commercial)"
         print(f"── {label} {'─'*(45-len(label))}")
 
-        # Appointments
-        n = sync_appointments(fr, bq, office_num, since_str)
-        totals["appointments"] += n
-        print(f"  Appointments:   {n:,} updated")
+        try:
+            # Appointments
+            n = sync_appointments(fr, bq, office_num, since_str)
+            totals["appointments"] += n
+            print(f"  Appointments:   {n:,} updated")
 
-        # Tickets + items
-        t, i = sync_tickets(fr, bq, office_num, since_str)
-        totals["tickets"] += t
-        totals["ticket_items"] += i
-        print(f"  Tickets:        {t:,} updated  ({i:,} line items)")
+            # Tickets + items
+            t, i = sync_tickets(fr, bq, office_num, since_str)
+            totals["tickets"] += t
+            totals["ticket_items"] += i
+            print(f"  Tickets:        {t:,} updated  ({i:,} line items)")
 
-        # Dim: customers
-        n = sync_customers(fr, bq, office_num, since_str)
-        totals["customers"] += n
-        print(f"  Customers:      {n:,} updated")
+            # Dim: customers
+            n = sync_customers(fr, bq, office_num, since_str)
+            totals["customers"] += n
+            print(f"  Customers:      {n:,} updated")
 
-        # Dim: subscriptions
-        n = sync_subscriptions(fr, bq, office_num, since_str)
-        totals["subscriptions"] += n
-        print(f"  Subscriptions:  {n:,} updated")
+            # Dim: subscriptions
+            n = sync_subscriptions(fr, bq, office_num, since_str)
+            totals["subscriptions"] += n
+            print(f"  Subscriptions:  {n:,} updated")
+
+        except Exception as e:
+            print(f"  ERROR: Office {office_num} sync failed — {e}")
+            print(f"  Skipping Office {office_num}; other offices unaffected.")
+            failed_offices.append(office_num)
 
         print()
 
     # ── Summary ────────────────────────────────────────────────────────────────
     print("=" * 65)
-    print("Sync complete.")
+    if failed_offices:
+        print(f"Sync finished WITH ERRORS — Office(s) {failed_offices} failed after retries.")
+    else:
+        print("Sync complete.")
     print(f"  Appointments:   {totals['appointments']:,}")
     print(f"  Tickets:        {totals['tickets']:,}  ({totals['ticket_items']:,} line items)")
     print(f"  Customers:      {totals['customers']:,}")
     print(f"  Subscriptions:  {totals['subscriptions']:,}")
+
+    if failed_offices:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

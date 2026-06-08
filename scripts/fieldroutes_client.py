@@ -8,6 +8,7 @@ API pattern:
   Create:  POST /api/{endpoint}/create → pass fields for new record
 """
 import os
+import time
 import requests
 from datetime import datetime
 
@@ -40,28 +41,56 @@ class FieldRoutesClient:
     def _auth(self):
         return {"authenticationKey": self.auth_key, "authenticationToken": self.auth_token}
 
+    REQUEST_TIMEOUT = 45    # seconds — fail fast instead of hanging for 20+ min
+    MAX_RETRIES     = 3     # retry transient timeouts/5xx errors before giving up
+    RETRY_BACKOFF   = [5, 15, 30]  # seconds between retries
+
     def _get(self, endpoint, action, params=None):
         url = f"{self.base_url}/{endpoint}/{action}"
         query = self._auth()
         if params:
             query.update(params)
-        response = self.session.get(url, params=query)
-        response.raise_for_status()
-        data = response.json()
-        if not data.get("success"):
-            raise RuntimeError(f"API error [{endpoint}/{action}]: {data.get('errorMessage', 'Unknown error')}")
-        return data
+        last_err = None
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                response = self.session.get(url, params=query, timeout=self.REQUEST_TIMEOUT)
+                response.raise_for_status()
+                data = response.json()
+                if not data.get("success"):
+                    raise RuntimeError(f"API error [{endpoint}/{action}]: {data.get('errorMessage', 'Unknown error')}")
+                return data
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                last_err = e
+                if attempt < self.MAX_RETRIES - 1:
+                    wait = self.RETRY_BACKOFF[attempt]
+                    print(f"    [retry {attempt+1}/{self.MAX_RETRIES-1}] {endpoint}/{action} timed out — waiting {wait}s")
+                    time.sleep(wait)
+        raise requests.exceptions.RetryError(
+            f"[{endpoint}/{action}] failed after {self.MAX_RETRIES} attempts"
+        ) from last_err
 
     def _post(self, endpoint, action, payload):
         url = f"{self.base_url}/{endpoint}/{action}"
         body = self._auth()
         body.update(payload)
-        response = self.session.post(url, data=body)
-        response.raise_for_status()
-        data = response.json()
-        if not data.get("success"):
-            raise RuntimeError(f"API error [{endpoint}/{action}]: {data.get('errorMessage', 'Unknown error')}")
-        return data
+        last_err = None
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                response = self.session.post(url, data=body, timeout=self.REQUEST_TIMEOUT)
+                response.raise_for_status()
+                data = response.json()
+                if not data.get("success"):
+                    raise RuntimeError(f"API error [{endpoint}/{action}]: {data.get('errorMessage', 'Unknown error')}")
+                return data
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                last_err = e
+                if attempt < self.MAX_RETRIES - 1:
+                    wait = self.RETRY_BACKOFF[attempt]
+                    print(f"    [retry {attempt+1}/{self.MAX_RETRIES-1}] {endpoint}/{action} timed out — waiting {wait}s")
+                    time.sleep(wait)
+        raise requests.exceptions.RetryError(
+            f"[{endpoint}/{action}] failed after {self.MAX_RETRIES} attempts"
+        ) from last_err
 
     # ── Customers ─────────────────────────────────────────────────────────────
 
