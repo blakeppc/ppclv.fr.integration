@@ -42,4 +42,4 @@ jobs:
         run: echo '${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}' > /tmp/gcp-key.json
 
       - name: BigQuery daily sync
-        run: python3 scripts/bq_daily_sync.py --days 2
+        run: python3 scripts/bq_daily_sync.py --days 4
