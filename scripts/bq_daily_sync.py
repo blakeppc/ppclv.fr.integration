@@ -269,34 +269,55 @@ def main():
 
     for office_num, fr in sorted(fr_clients.items()):
         label = "Office 1 (Residential)" if office_num == 1 else "Office 2 (Commercial)"
+        office_name = "Residential" if office_num == 1 else "Commercial"
         print(f"── {label} {'─'*(45-len(label))}")
 
+        counts = {"appointments": 0, "tickets": 0, "ticket_items": 0,
+                  "customers": 0, "subscriptions": 0}
+        error_msg = None
+
         try:
-            # Appointments
-            n = sync_appointments(fr, bq, office_num, since_str)
-            totals["appointments"] += n
-            print(f"  Appointments:   {n:,} updated")
+            counts["appointments"] = sync_appointments(fr, bq, office_num, since_str)
+            print(f"  Appointments:   {counts['appointments']:,} updated")
 
-            # Tickets + items
-            t, i = sync_tickets(fr, bq, office_num, since_str)
-            totals["tickets"] += t
-            totals["ticket_items"] += i
-            print(f"  Tickets:        {t:,} updated  ({i:,} line items)")
+            counts["tickets"], counts["ticket_items"] = sync_tickets(fr, bq, office_num, since_str)
+            print(f"  Tickets:        {counts['tickets']:,} updated  ({counts['ticket_items']:,} line items)")
 
-            # Dim: customers
-            n = sync_customers(fr, bq, office_num, since_str)
-            totals["customers"] += n
-            print(f"  Customers:      {n:,} updated")
+            counts["customers"] = sync_customers(fr, bq, office_num, since_str)
+            print(f"  Customers:      {counts['customers']:,} updated")
 
-            # Dim: subscriptions
-            n = sync_subscriptions(fr, bq, office_num, since_str)
-            totals["subscriptions"] += n
-            print(f"  Subscriptions:  {n:,} updated")
+            counts["subscriptions"] = sync_subscriptions(fr, bq, office_num, since_str)
+            print(f"  Subscriptions:  {counts['subscriptions']:,} updated")
 
         except Exception as e:
+            error_msg = str(e)
             print(f"  ERROR: Office {office_num} sync failed — {e}")
             print(f"  Skipping Office {office_num}; other offices unaffected.")
             failed_offices.append(office_num)
+
+        # Write health record regardless of success or failure
+        try:
+            bq.load_rows("sync_health", [{
+                "run_at":               now.isoformat(),
+                "office_id":            office_num,
+                "office_name":          office_name,
+                "status":               "error" if error_msg else "success",
+                "error_message":        error_msg,
+                "lookback_days":        args.days,
+                "appointments_synced":  counts["appointments"],
+                "tickets_synced":       counts["tickets"],
+                "ticket_items_synced":  counts["ticket_items"],
+                "customers_synced":     counts["customers"],
+                "subscriptions_synced": counts["subscriptions"],
+            }])
+        except Exception as health_err:
+            print(f"  WARNING: Could not write sync_health record — {health_err}")
+
+        for k, v in counts.items():
+            if k in ("ticket_items",):
+                continue
+            totals[k] += v
+        totals["ticket_items"] += counts["ticket_items"]
 
         print()
 
