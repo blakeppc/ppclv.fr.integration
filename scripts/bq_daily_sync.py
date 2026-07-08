@@ -109,24 +109,23 @@ def sync_appointments(fr, bq, office_num, since_str):
 
 
 def sync_tickets(fr, bq, office_num, since_str):
-    """Sync tickets for appointments updated since since_str.
+    """Sync tickets for appointments recently added.
 
-    NOTE: The FieldRoutes ticket search API ignores all date filters and always
-    returns the same first 50k tickets regardless of params. We instead find
-    recently-updated appointments, collect their ticket_ids, and fetch those
-    tickets directly by ID — this is the only reliable way to get current data.
+    NOTE: FR ticket/search ignores ALL date filters (always returns same 50k).
+    FR appointment/search only works with dateAddedStart (not dateUpdatedStart).
+    So we query BigQuery for ticket_ids from appointments added since since_date
+    — sync_appointments already loaded those appointments — then fetch the tickets
+    directly by ID from the FR API.
     """
-    # Find appointments updated recently
-    appt_ids = fetch_ids_since(fr, fr.search_appointments, since_str, {}, "appointmentIDs")
-    if not appt_ids:
-        return 0, 0
-
-    # Get those appointments to extract their ticket_ids
-    appointments = fetch_in_batches(fr.get_appointments, appt_ids)
-    ticket_ids = list({
-        int(a["ticketID"]) for a in appointments
-        if a.get("ticketID") and int(a.get("ticketID", 0)) > 0
-    })
+    since_date = since_str[:10]
+    rows = bq.query(f"""
+        SELECT DISTINCT ticket_id
+        FROM `{bq.table_ref("fact_appointments")}`
+        WHERE office_id = {office_num}
+          AND date_added >= '{since_date}'
+          AND ticket_id IS NOT NULL AND ticket_id > 0
+    """)
+    ticket_ids = [r.ticket_id for r in rows]
 
     if not ticket_ids:
         return 0, 0
