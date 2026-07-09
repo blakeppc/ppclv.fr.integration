@@ -5,8 +5,8 @@ Runs every night via GitHub Actions. Keeps BigQuery current without
 re-pulling 5 years of history each time.
 
 What it updates:
-  - fact_appointments  → any appointment updated in the lookback window
-  - fact_tickets       → any ticket updated in the lookback window
+  - fact_appointments  → any appointment scheduled in the lookback window
+  - fact_tickets       → tickets for those appointments (fetched by ID)
   - fact_ticket_items  → line items for those tickets
   - dim_customers      → customers updated recently (active status, etc.)
   - dim_subscriptions  → subscriptions updated recently (price, frequency, etc.)
@@ -79,19 +79,20 @@ def bq_delete_by_ids(bq, table, id_col, ids):
 # ── Fact table sync ───────────────────────────────────────────────────────────
 
 def sync_appointments(fr, bq, office_num, since_str):
-    """Sync appointments added since since_str. Returns row count.
+    """Sync appointments scheduled within the lookback window. Returns row count.
 
-    NOTE: The FieldRoutes appointment search API ignores dateUpdatedStart,
-    scheduledStart, dateCompletedStart, and status filters — all return the
-    same 50,000 oldest appointments regardless of parameters.
+    Uses dateStart/dateEnd (scheduled date) rather than dateAddedStart.
+    This correctly captures commercial appointments scheduled months in advance
+    — their tickets are created when the appointment is booked, so using
+    dateAddedStart would miss them entirely once they're older than the lookback.
 
-    Workaround: use dateAddedStart, which is the only filter that works.
-    This captures new appointments. Status changes on existing appointments
-    (completions, cancellations) are indirectly captured: the ticket sync
-    pulls completed appointment revenue via the appointment→ticketID link.
+    dateStart/dateEnd confirmed working on the FR API (unlike dateUpdatedStart,
+    scheduledStart, dateCompletedStart, and status filters which all return
+    the same 50,000 oldest records regardless of value).
     """
-    since_date = since_str[:10]  # dateAddedStart accepts YYYY-MM-DD only
-    result = fr.search_appointments({"dateAddedStart": since_date})
+    date_start = since_str[:10]
+    date_end   = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    result = fr.search_appointments({"dateStart": date_start, "dateEnd": date_end})
     time.sleep(SLEEP_BETWEEN_CALLS)
     appt_ids = result.get("appointmentIDs", [])
     if not appt_ids:
@@ -109,20 +110,20 @@ def sync_appointments(fr, bq, office_num, since_str):
 
 
 def sync_tickets(fr, bq, office_num, since_str):
-    """Sync tickets for appointments recently added.
+    """Sync tickets for appointments scheduled in the lookback window.
 
     NOTE: FR ticket/search ignores ALL date filters (always returns same 50k).
-    FR appointment/search only works with dateAddedStart (not dateUpdatedStart).
-    So we query BigQuery for ticket_ids from appointments added since since_date
-    — sync_appointments already loaded those appointments — then fetch the tickets
-    directly by ID from the FR API.
+    So we query BigQuery for ticket_ids from appointments scheduled in the
+    lookback window — sync_appointments already loaded those — then fetch
+    the tickets directly by ID from the FR API.
     """
-    since_date = since_str[:10]
+    date_start = since_str[:10]
+    date_end   = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     rows = bq.query(f"""
         SELECT DISTINCT ticket_id
         FROM `{bq.table_ref("fact_appointments")}`
         WHERE office_id = {office_num}
-          AND date_added >= '{since_date}'
+          AND scheduled_date BETWEEN '{date_start}' AND '{date_end}'
           AND ticket_id IS NOT NULL AND ticket_id > 0
     """)
     ticket_ids = [r.ticket_id for r in rows]
