@@ -103,7 +103,15 @@ def sync_appointments(fr, bq, office_num, since_str):
             if str(a.get("officeID", "-1")) != "-1"]
 
     if rows:
-        bq_delete_by_ids(bq, "fact_appointments", "appointment_id", appt_ids)
+        # Delete by date range (not by ID) so that appointments cancelled or
+        # rescheduled off this date window are also removed — FR drops them
+        # from dateStart/dateEnd search results, so an ID-only delete leaves
+        # stale status=0 records in BQ that inflate the "not serviced" count.
+        bq.query(f"""
+            DELETE FROM `{bq.table_ref("fact_appointments")}`
+            WHERE office_id = {office_num}
+              AND scheduled_date BETWEEN '{date_start}' AND '{date_end}'
+        """)
         bq.load_rows("fact_appointments", rows)
 
     return len(rows)
