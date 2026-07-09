@@ -92,7 +92,7 @@ def sync_appointments(fr, bq, office_num, since_str):
     """
     date_start = since_str[:10]
     date_end   = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    result = fr.search_appointments({"dateStart": date_start, "dateEnd": date_end})
+    result = fr.search_appointments({"dateStart": date_start, "dateEnd": date_end, "status": "1"})
     time.sleep(SLEEP_BETWEEN_CALLS)
     appt_ids = result.get("appointmentIDs", [])
     if not appt_ids:
