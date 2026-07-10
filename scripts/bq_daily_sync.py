@@ -92,21 +92,39 @@ def sync_appointments(fr, bq, office_num, since_str):
     """
     date_start = since_str[:10]
     date_end   = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # FR's dateStart/dateEnd search only returns active appointments — it silently
+    # drops cancelled (status=-1) and rescheduled (status=-2) ones. We track which
+    # IDs were already in BQ for this window so we can re-fetch their current status
+    # and preserve them (needed for same-day cancel/reschedule reporting).
+    existing_rows = bq.query(f"""
+        SELECT DISTINCT appointment_id
+        FROM `{bq.table_ref("fact_appointments")}`
+        WHERE office_id = {office_num}
+          AND scheduled_date BETWEEN '{date_start}' AND '{date_end}'
+    """)
+    existing_ids = {r.appointment_id for r in existing_rows}
+
     result = fr.search_appointments({"dateStart": date_start, "dateEnd": date_end})
     time.sleep(SLEEP_BETWEEN_CALLS)
-    appt_ids = result.get("appointmentIDs", [])
-    if not appt_ids:
+    active_ids = set(result.get("appointmentIDs", []))
+    if not active_ids and not existing_ids:
         return 0
 
-    appointments = fetch_in_batches(fr.get_appointments, appt_ids)
+    appointments = fetch_in_batches(fr.get_appointments, list(active_ids)) if active_ids else []
+
+    # Re-fetch any IDs that were in BQ but dropped from FR search — these are
+    # cancelled/rescheduled. FR returns them with their original scheduled_date
+    # and actual status (-1 Cancelled / -2 Re-Scheduled).
+    inactive_ids = existing_ids - active_ids
+    if inactive_ids:
+        inactive_appts = fetch_in_batches(fr.get_appointments, list(inactive_ids))
+        appointments.extend(inactive_appts)
+
     rows = [bq.appointment_row(a) for a in appointments
             if str(a.get("officeID", "-1")) != "-1"]
 
     if rows:
-        # Delete by date range (not by ID) so that appointments cancelled or
-        # rescheduled off this date window are also removed — FR drops them
-        # from dateStart/dateEnd search results, so an ID-only delete leaves
-        # stale status=0 records in BQ that inflate the "not serviced" count.
         bq.query(f"""
             DELETE FROM `{bq.table_ref("fact_appointments")}`
             WHERE office_id = {office_num}

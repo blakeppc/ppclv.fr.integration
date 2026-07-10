@@ -2,9 +2,10 @@ name: BigQuery Daily Sync
 
 on:
   schedule:
-    # Runs at 3:00 AM UTC daily (8pm MT / 7pm PT)
-    # Runs after all field work is done for the day
+    # 3:00 AM UTC (8pm PDT) — after all field work is done
     - cron: "0 3 * * *"
+    # 12:45 UTC (5:45 AM PDT) — pre-summary sync so 6 AM post has fresh data
+    - cron: "45 12 * * *"
   workflow_dispatch:  # ← "Run workflow" button for manual runs
 
 jobs:
