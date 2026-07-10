@@ -186,6 +186,8 @@ class BQClient:
             "date_added":        self._date(c.get("dateAdded")),
             "date_cancelled":    self._date(c.get("dateCancelled")),
             "source":            (c.get("source") or "").strip(),
+            "bill_to_account_id":self._int(c.get("billToAccountID"), 0),
+            "auto_pay":          str(c.get("aPay", "No")).strip().lower() == "yes",
             "loaded_at":         self.now_utc(),
         }
 

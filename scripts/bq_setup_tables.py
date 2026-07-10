@@ -94,6 +94,8 @@ SCHEMAS = {
         bigquery.SchemaField("date_added",          "DATE",    mode="NULLABLE"),
         bigquery.SchemaField("date_cancelled",      "DATE",    mode="NULLABLE"),
         bigquery.SchemaField("source",              "STRING",  mode="NULLABLE"),
+        bigquery.SchemaField("bill_to_account_id",  "INTEGER", mode="NULLABLE"),
+        bigquery.SchemaField("auto_pay",            "BOOLEAN", mode="NULLABLE"),
         bigquery.SchemaField("loaded_at",           "TIMESTAMP", mode="NULLABLE"),
     ],
 
