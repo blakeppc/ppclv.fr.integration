@@ -100,6 +100,9 @@ def create_views(bq):
         """,
 
         # ── Tech production by month ──────────────────────────────────────────
+        # production_value: explicit when set in FR, otherwise equals revenue
+        # revenue_value:    the invoice total (what was actually charged)
+        # These differ for warranty/free services and discounted commercial accounts
         "v_tech_production": f"""
             SELECT
                 DATE_TRUNC(a.scheduled_date, MONTH)          AS month,
@@ -110,19 +113,31 @@ def create_views(bq):
                                                               AS tech_name,
                 COALESCE(e.initials, '')                      AS initials,
                 COUNT(*)                                      AS completed_jobs,
-                ROUND(SUM(a.production_value), 2)             AS production_value,
-                ROUND(AVG(a.production_value), 2)             AS avg_job_value,
+                ROUND(SUM(
+                    CASE WHEN tk.production_value >= 0
+                         THEN tk.production_value
+                         ELSE tk.total END
+                ), 2)                                         AS production_value,
+                ROUND(SUM(tk.total), 2)                       AS revenue_value,
+                ROUND(AVG(
+                    CASE WHEN tk.production_value >= 0
+                         THEN tk.production_value
+                         ELSE tk.total END
+                ), 2)                                         AS avg_job_production,
+                ROUND(AVG(tk.total), 2)                       AS avg_job_revenue,
                 COUNTIF(st.reservice = TRUE OR a.reservice_reason_id IS NOT NULL)
                                                               AS reservice_count
             FROM {T("fact_appointments")} a
+            JOIN {T("fact_tickets")} tk
+              ON a.ticket_id = tk.ticket_id
             LEFT JOIN {T("dim_employees")} e
                    ON a.serviced_by_id = e.employee_id
             LEFT JOIN {T("dim_service_types")} st
                    ON a.service_type_id = st.type_id
-            WHERE a.status            = 1       -- completed only
-              AND a.serviced_by_id   IS NOT NULL
-              AND a.scheduled_date   IS NOT NULL
-              AND a.production_value  > 0
+            WHERE a.status           = 1
+              AND a.serviced_by_id  IS NOT NULL
+              AND a.scheduled_date  IS NOT NULL
+              AND tk.total           > 0
             GROUP BY 1, 2, 3, 4, 5, 6
         """,
 
@@ -138,21 +153,32 @@ def create_views(bq):
                 COALESCE(e.initials, '')                               AS initials,
                 COUNT(*)                                               AS jobs_with_time,
                 ROUND(SUM(a.duration_actual_min) / 60.0, 2)           AS total_hours_on_site,
-                ROUND(SUM(a.production_value), 2)                     AS total_production,
+                ROUND(SUM(
+                    CASE WHEN tk.production_value >= 0
+                         THEN tk.production_value ELSE tk.total END
+                ), 2)                                                  AS total_production,
+                ROUND(SUM(tk.total), 2)                                AS total_revenue,
                 ROUND(AVG(a.duration_actual_min), 1)                  AS avg_minutes_per_job,
                 CASE WHEN SUM(a.duration_actual_min) > 0
-                     THEN ROUND(SUM(a.production_value)
-                                / (SUM(a.duration_actual_min) / 60.0), 2)
-                     ELSE NULL END                                     AS dollars_per_hour
+                     THEN ROUND(
+                         SUM(CASE WHEN tk.production_value >= 0
+                                  THEN tk.production_value ELSE tk.total END)
+                         / (SUM(a.duration_actual_min) / 60.0), 2)
+                     ELSE NULL END                                     AS production_per_hour,
+                CASE WHEN SUM(a.duration_actual_min) > 0
+                     THEN ROUND(SUM(tk.total) / (SUM(a.duration_actual_min) / 60.0), 2)
+                     ELSE NULL END                                     AS revenue_per_hour
             FROM {T("fact_appointments")} a
+            JOIN {T("fact_tickets")} tk
+              ON a.ticket_id = tk.ticket_id
             LEFT JOIN {T("dim_employees")} e
                    ON a.serviced_by_id = e.employee_id
-            WHERE a.status              = 1        -- completed
+            WHERE a.status              = 1
               AND a.duration_actual_min > 0
-              AND a.duration_actual_min < 600       -- under 10 hrs (sanity)
+              AND a.duration_actual_min < 600
               AND a.serviced_by_id     IS NOT NULL
               AND a.scheduled_date     IS NOT NULL
-              AND a.production_value    > 0
+              AND tk.total              > 0
             GROUP BY 1, 2, 3, 4, 5, 6
         """,
 
@@ -306,9 +332,13 @@ def create_views(bq):
                 c.zip,
                 st.description                        AS service_type,
                 a.duration_scheduled_min,
-                a.production_value,
+                CASE WHEN tk.production_value >= 0
+                     THEN tk.production_value ELSE tk.total END AS production_value,
+                tk.total                                        AS revenue_value,
                 a.appointment_id
             FROM {T("fact_appointments")} a
+            LEFT JOIN {T("fact_tickets")} tk
+              ON a.ticket_id = tk.ticket_id
             LEFT JOIN {T("dim_employees")}     e  ON a.assigned_tech_id = e.employee_id
             LEFT JOIN {T("dim_customers")}     c  ON a.customer_id      = c.customer_id
             LEFT JOIN {T("dim_service_types")} st ON a.service_type_id  = st.type_id
