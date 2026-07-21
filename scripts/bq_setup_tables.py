@@ -125,6 +125,7 @@ SCHEMAS = {
         bigquery.SchemaField("route_id",                 "INTEGER", mode="NULLABLE"),
         bigquery.SchemaField("sequence",                 "INTEGER", mode="NULLABLE"),
         bigquery.SchemaField("assigned_tech_id",         "INTEGER", mode="NULLABLE"),
+        bigquery.SchemaField("route_tech_id",            "INTEGER", mode="NULLABLE"),
         bigquery.SchemaField("serviced_by_id",           "INTEGER", mode="NULLABLE"),
         bigquery.SchemaField("additional_tech_ids",      "STRING",  mode="NULLABLE"),
         bigquery.SchemaField("service_type_id",          "INTEGER", mode="NULLABLE"),

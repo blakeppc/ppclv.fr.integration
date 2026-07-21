@@ -219,7 +219,7 @@ class BQClient:
             "loaded_at":       self.now_utc(),
         }
 
-    def appointment_row(self, a):
+    def appointment_row(self, a, route_tech_map=None):
         # Calculate actual duration from timeIn/timeOut
         duration_actual = None
         try:
@@ -239,6 +239,17 @@ class BQClient:
         elif additional:
             additional = str(additional)
 
+        # Resolve the route's assigned tech. The appointment's own assignedTech
+        # is often 0/unset for pending appointments (FieldRoutes only backfills
+        # it onto the appointment later, sometimes not until completion), so the
+        # route-level assignment is the reliable source of who's actually running
+        # the job. Stored separately from assigned_tech_id to preserve the raw
+        # appointment field; downstream should COALESCE(NULLIF(assigned_tech_id,0),
+        # route_tech_id) to get the best available tech.
+        route_tech_id = None
+        if route_tech_map:
+            route_tech_id = route_tech_map.get(self._int(a.get("routeID")))
+
         return {
             "appointment_id":        self._int(a.get("appointmentID"), 0),
             "customer_id":           self._int(a.get("customerID")),
@@ -248,6 +259,7 @@ class BQClient:
             "route_id":              self._int(a.get("routeID")),
             "sequence":              self._int(a.get("sequence")),
             "assigned_tech_id":      self._int(a.get("assignedTech")),
+            "route_tech_id":         route_tech_id,
             "serviced_by_id":        self._int(a.get("servicedBy")),
             "additional_tech_ids":   additional,
             "service_type_id":       self._int(a.get("type")),

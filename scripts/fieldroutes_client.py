@@ -146,6 +146,27 @@ class FieldRoutesClient:
         data = self._get("appointment", "get", {"appointmentIDs": ids})
         return data.get("appointments", [])
 
+    # ── Routes (assigned tech per day/route — appointments alone don't reliably
+    #    carry this: assignedTech on a pending appointment is often still 0/unset
+    #    until FieldRoutes backfills it from the route, sometimes not until the
+    #    appointment is actually completed) ──────────────────────────────────────
+
+    def search_routes(self, date_str, office_id):
+        """Returns list of routeIDs scheduled for a given date/office.
+        Route search takes 'date' (single day), not dateStart/dateEnd.
+        """
+        return self._get("route", "search", {"date": date_str, "officeID": office_id})
+
+    def get_routes(self, route_ids):
+        """Fetches full route records. Includes assignedTech, title, groupTitle,
+        date, officeID — assignedTech here is the reliable source of truth for
+        who's actually running a route, even when individual appointments on
+        that route haven't had their own assignedTech field populated yet.
+        """
+        ids = ",".join(str(i) for i in route_ids) if isinstance(route_ids, list) else str(route_ids)
+        data = self._get("route", "get", {"routeIDs": ids})
+        return data.get("routes", [])
+
     # ── Tickets (invoices with line items) ────────────────────────────────────
 
     def search_tickets(self, filters=None):

@@ -78,6 +78,45 @@ def bq_delete_by_ids(bq, table, id_col, ids):
 
 # ── Fact table sync ───────────────────────────────────────────────────────────
 
+def build_route_tech_map(fr, office_num, date_start, date_end):
+    """Map {route_id: assigned_tech_id} for every route in the date window.
+
+    A pending appointment's own assignedTech field is frequently 0/unset —
+    FieldRoutes carries the real assignment on the route, not the appointment,
+    until the job is completed. Fetching routes per day lets us attribute
+    pending appointments to the correct tech. route/search takes a single
+    'date' (no range), so we walk each calendar day in the window.
+    """
+    route_tech = {}
+    d = datetime.strptime(date_start, "%Y-%m-%d").date()
+    end = datetime.strptime(date_end, "%Y-%m-%d").date()
+    while d <= end:
+        try:
+            result = fr.search_routes(d.strftime("%Y-%m-%d"), office_num)
+            time.sleep(SLEEP_BETWEEN_CALLS)
+            route_ids = result.get("routeIDs", [])
+            for i in range(0, len(route_ids), BATCH_SIZE):
+                batch = route_ids[i:i + BATCH_SIZE]
+                routes = fr.get_routes(batch)
+                time.sleep(SLEEP_BETWEEN_CALLS)
+                for r in routes:
+                    rid = _to_int(r.get("routeID"))
+                    tech = _to_int(r.get("assignedTech"))
+                    if rid is not None and tech:  # skip 0/None — no real tech assigned
+                        route_tech[rid] = tech
+        except Exception as e:
+            print(f"    WARNING: route fetch for {d} (office {office_num}) failed — {e}")
+        d += timedelta(days=1)
+    return route_tech
+
+
+def _to_int(val):
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return None
+
+
 def sync_appointments(fr, bq, office_num, since_str):
     """Sync appointments scheduled within the lookback window. Returns row count.
 
@@ -121,7 +160,11 @@ def sync_appointments(fr, bq, office_num, since_str):
         inactive_appts = fetch_in_batches(fr.get_appointments, list(inactive_ids))
         appointments.extend(inactive_appts)
 
-    rows = [bq.appointment_row(a) for a in appointments
+    # Route-level tech assignment (reliable source for pending appointments whose
+    # own assignedTech field is still unset).
+    route_tech_map = build_route_tech_map(fr, office_num, date_start, date_end)
+
+    rows = [bq.appointment_row(a, route_tech_map) for a in appointments
             if str(a.get("officeID", "-1")) != "-1"]
 
     if rows:
