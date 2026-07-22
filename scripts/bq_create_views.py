@@ -104,6 +104,13 @@ def create_views(bq):
         # revenue_value:    the invoice total (what was actually charged)
         # These differ for warranty/free services and discounted commercial accounts
         "v_tech_production": f"""
+            WITH svc_types AS (
+                -- dim_service_types has duplicate type_ids; dedupe before joining
+                -- or the join fans out and doubles SUM(production).
+                SELECT type_id, ANY_VALUE(reservice) AS reservice
+                FROM {T("dim_service_types")}
+                GROUP BY type_id
+            )
             SELECT
                 DATE_TRUNC(a.scheduled_date, MONTH)          AS month,
                 a.office_id,
@@ -132,12 +139,18 @@ def create_views(bq):
               ON a.ticket_id = tk.ticket_id
             LEFT JOIN {T("dim_employees")} e
                    ON a.serviced_by_id = e.employee_id
-            LEFT JOIN {T("dim_service_types")} st
+            LEFT JOIN svc_types st
                    ON a.service_type_id = st.type_id
             WHERE a.status           = 1
               AND a.serviced_by_id  IS NOT NULL
               AND a.scheduled_date  IS NOT NULL
-              AND tk.total           > 0
+            -- NOTE: no "tk.total > 0" filter. It dropped prepaid/contract
+            -- commercial services that carry production credit but bill $0 on
+            -- the visit (129 rows / $26,618.99 for June commercial alone),
+            -- undercounting production vs the FieldRoutes commission report.
+            -- Production comes from the CASE above (tk.production_value when set,
+            -- else tk.total), verified to match FR's Production Value on 100%
+            -- of June commercial rows.
             GROUP BY 1, 2, 3, 4, 5, 6
         """,
 
@@ -178,7 +191,8 @@ def create_views(bq):
               AND a.duration_actual_min < 600
               AND a.serviced_by_id     IS NOT NULL
               AND a.scheduled_date     IS NOT NULL
-              AND tk.total              > 0
+            -- No "tk.total > 0" filter (see v_tech_production note) — it dropped
+            -- prepaid/contract services that carry production credit but bill $0.
             GROUP BY 1, 2, 3, 4, 5, 6
         """,
 
