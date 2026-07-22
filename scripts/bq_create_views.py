@@ -198,6 +198,13 @@ def create_views(bq):
 
         # ── Reservice rates ───────────────────────────────────────────────────
         "v_reservice_rates": f"""
+            WITH svc_types AS (
+                -- dim_service_types has duplicate type_ids (true dupes); dedupe
+                -- to avoid a join fan-out that doubles the counts below.
+                SELECT type_id, ANY_VALUE(reservice) AS reservice
+                FROM {T("dim_service_types")}
+                GROUP BY type_id
+            )
             SELECT
                 DATE_TRUNC(a.scheduled_date, MONTH)  AS month,
                 a.office_id,
@@ -216,7 +223,7 @@ def create_views(bq):
             FROM {T("fact_appointments")} a
             LEFT JOIN {T("dim_employees")} e
                    ON a.serviced_by_id = e.employee_id
-            LEFT JOIN {T("dim_service_types")} st
+            LEFT JOIN svc_types st
                    ON a.service_type_id = st.type_id
             WHERE a.status           = 1
               AND a.serviced_by_id  IS NOT NULL
@@ -260,7 +267,18 @@ def create_views(bq):
 
         # ── Inspection → conversion rate ──────────────────────────────────────
         "v_inspection_conversion": f"""
-            WITH inspections AS (
+            WITH svc_types AS (
+                -- dim_service_types has duplicate type_ids (true dupes); dedupe
+                -- so the joins below don't fan out and double the inspection counts.
+                SELECT type_id,
+                       ANY_VALUE(description)     AS description,
+                       ANY_VALUE(is_inspection)   AS is_inspection,
+                       ANY_VALUE(reservice)       AS reservice,
+                       ANY_VALUE(regular_service) AS regular_service
+                FROM {T("dim_service_types")}
+                GROUP BY type_id
+            ),
+            inspections AS (
                 SELECT
                     a.appointment_id,
                     a.customer_id,
@@ -268,7 +286,7 @@ def create_views(bq):
                     a.scheduled_date    AS inspection_date,
                     st.description      AS inspection_type
                 FROM {T("fact_appointments")} a
-                JOIN {T("dim_service_types")} st
+                JOIN svc_types st
                   ON a.service_type_id = st.type_id
                 WHERE st.is_inspection = TRUE
                   AND a.status         = 1
@@ -276,7 +294,7 @@ def create_views(bq):
             followup AS (
                 SELECT DISTINCT a.customer_id, a.scheduled_date
                 FROM {T("fact_appointments")} a
-                JOIN {T("dim_service_types")} st
+                JOIN svc_types st
                   ON a.service_type_id = st.type_id
                 WHERE a.status         = 1
                   AND st.is_inspection = FALSE
@@ -329,6 +347,13 @@ def create_views(bq):
 
         # ── Office 2 route analysis — upcoming month ──────────────────────────
         "v_route_analysis_office2": f"""
+            WITH svc_types AS (
+                -- dim_service_types has duplicate type_ids (true dupes); dedupe
+                -- so this per-appointment view doesn't emit duplicate rows.
+                SELECT type_id, ANY_VALUE(description) AS description
+                FROM {T("dim_service_types")}
+                GROUP BY type_id
+            )
             SELECT
                 a.scheduled_date,
                 a.route_id,
@@ -355,7 +380,7 @@ def create_views(bq):
               ON a.ticket_id = tk.ticket_id
             LEFT JOIN {T("dim_employees")}     e  ON a.assigned_tech_id = e.employee_id
             LEFT JOIN {T("dim_customers")}     c  ON a.customer_id      = c.customer_id
-            LEFT JOIN {T("dim_service_types")} st ON a.service_type_id  = st.type_id
+            LEFT JOIN svc_types st ON a.service_type_id  = st.type_id
             WHERE a.office_id       = 2
               AND a.status          = 0    -- pending / scheduled
               AND a.scheduled_date >= DATE_TRUNC(DATE_ADD(CURRENT_DATE(), INTERVAL 1 MONTH), MONTH)
