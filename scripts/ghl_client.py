@@ -86,19 +86,32 @@ class GHLClient:
 
     # ── Contacts ───────────────────────────────────────────────────────────────
 
+    def _find_duplicate(self, email=None, phone=None):
+        """Look up an existing contact via GHL's duplicate-contact endpoint.
+        The old `GET /contacts/?email=` list-filter was deprecated and now returns
+        422; `/contacts/search/duplicate` is the supported lookup (email first,
+        then phone, which this endpoint takes as `number`). Returns the contact
+        dict or None (404 = no duplicate)."""
+        params = {"locationId": self.location_id}
+        if email:
+            params["email"] = email
+        if phone:
+            params["number"] = phone
+        resp = self.session.get(f"{self.BASE_URL}/contacts/search/duplicate", params=params)
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.json().get("contact")
+
     def find_by_email(self, email):
         if not email:
             return None
-        data = self._get("contacts/", {"locationId": self.location_id, "email": email})
-        contacts = data.get("contacts", [])
-        return contacts[0] if contacts else None
+        return self._find_duplicate(email=email)
 
     def find_by_phone(self, phone):
         if not phone:
             return None
-        data = self._get("contacts/", {"locationId": self.location_id, "phone": phone})
-        contacts = data.get("contacts", [])
-        return contacts[0] if contacts else None
+        return self._find_duplicate(phone=phone)
 
     def create_contact(self, payload):
         payload["locationId"] = self.location_id

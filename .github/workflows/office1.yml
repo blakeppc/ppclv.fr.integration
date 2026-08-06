@@ -2,9 +2,8 @@ name: Office 1 — Preventive Las Vegas
 
 on:
   schedule:
-    # Runs at 9am Mountain Time on the 1st of every month
-    # (9am MT = 4pm UTC in summer, 5pm UTC in winter — using 16:00 UTC)
-    - cron: "0 16 1 * *"
+    # Daily at 2am Pacific (9:00 UTC during PDT; 1am PST in winter — UTC cron can't track DST)
+    - cron: "0 9 * * *"
   workflow_dispatch:  # ← This adds a "Run workflow" button so you can trigger it manually anytime
 
 jobs:

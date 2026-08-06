@@ -2,8 +2,8 @@ name: Office 2 — Preventive Pest Control Commercial
 
 on:
   schedule:
-    # Runs at 9am Mountain Time on the 1st of every month
-    - cron: "0 16 1 * *"
+    # Daily at 2am Pacific (9:00 UTC during PDT; 1am PST in winter — UTC cron can't track DST)
+    - cron: "0 9 * * *"
   workflow_dispatch:  # ← "Run workflow" button for manual runs
 
 jobs:
