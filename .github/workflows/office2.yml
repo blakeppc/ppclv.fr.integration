@@ -5,11 +5,17 @@ on:
     # Daily at 2am Pacific (9:00 UTC during PDT; 1am PST in winter — UTC cron can't track DST)
     - cron: "0 9 * * *"
   workflow_dispatch:  # ← "Run workflow" button for manual runs
+    inputs:
+      days:
+        description: "Lookback days (default 2; use e.g. 75 for a one-time catch-up/backfill)"
+        required: false
+        default: "2"
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # High cap so an occasional wide-lookback catch-up can finish; daily runs take ~3 min.
+    timeout-minutes: 150
 
     env:
       FR_OFFICE2_SUBDOMAIN: ${{ secrets.FR_OFFICE2_SUBDOMAIN }}
@@ -34,4 +40,4 @@ jobs:
         run: python3 scripts/test_connection.py
 
       - name: GHL daily sync — Office 2
-        run: python3 scripts/ghl_sync_office2.py
+        run: python3 scripts/ghl_sync_office2.py --days ${{ github.event.inputs.days || '2' }}
