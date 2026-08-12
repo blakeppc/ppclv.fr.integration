@@ -87,13 +87,19 @@ def service_tags(subs):
 # in the all-active pull, so these only need the inactive query.
 BAITING_SERVICE_IDS = [1595, 225, 1363, 1384]
 
+# FieldRoutes allows 60 read requests/minute; get accepts up to 500 IDs at once.
+SUB_BATCH = 500
+FR_SLEEP = 1.1
+
 
 def _fetch_subs(fr, filters):
     res = fr.search_subscriptions(filters)
+    time.sleep(FR_SLEEP)
     ids = res.get("subscriptionIDs", []) if isinstance(res, dict) else []
     out = []
-    for k in range(0, len(ids), 100):
-        out.extend(fr.get_subscriptions(ids[k:k + 100]))
+    for k in range(0, len(ids), SUB_BATCH):
+        out.extend(fr.get_subscriptions(ids[k:k + SUB_BATCH]))
+        time.sleep(FR_SLEEP)
     return out
 
 
