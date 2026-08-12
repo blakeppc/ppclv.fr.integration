@@ -82,15 +82,37 @@ def service_tags(subs):
     return tags
 
 
-def subs_by_customer(fr, customer_ids):
-    """Fetch all subscriptions for a batch of customers, grouped by customerID (str)."""
-    out = {}
-    res = fr.search_subscriptions({"customerIDs": ",".join(str(c) for c in customer_ids)})
-    sub_ids = res.get("subscriptionIDs", []) if isinstance(res, dict) else []
-    for k in range(0, len(sub_ids), 100):
-        for s in fr.get_subscriptions(sub_ids[k:k + 100]):
-            out.setdefault(str(s.get("customerID")), []).append(s)
+# Rodent Baiting Program / Bm / Mt / Initial — used for the inactive-baiting pull
+# (svc_rodent_baiting counts active OR inactive). Active baiting is caught by name
+# in the all-active pull, so these only need the inactive query.
+BAITING_SERVICE_IDS = [1595, 225, 1363, 1384]
+
+
+def _fetch_subs(fr, filters):
+    res = fr.search_subscriptions(filters)
+    ids = res.get("subscriptionIDs", []) if isinstance(res, dict) else []
+    out = []
+    for k in range(0, len(ids), 100):
+        out.extend(fr.get_subscriptions(ids[k:k + 100]))
     return out
+
+
+def build_subscription_map(fr):
+    """One bulk pull per run (independent of how many customers we sync, so it
+    scales to a wide catch-up under FR's read cap). Returns {customerID(str): [subs]}
+    containing all ACTIVE Office-1 subscriptions plus INACTIVE rodent-baiting subs.
+    Note: subscription/search filters by a SINGLE customerID, not a batch — hence
+    the office-wide pull rather than per-customer lookups."""
+    subs = {}
+
+    def add(records):
+        for s in records:
+            subs.setdefault(str(s.get("customerID")), []).append(s)
+
+    add(_fetch_subs(fr, {"officeIDs": OFFICE_NUM, "active": 1}))
+    for sid in BAITING_SERVICE_IDS:
+        add(_fetch_subs(fr, {"officeIDs": OFFICE_NUM, "active": 0, "serviceID": sid}))
+    return subs
 
 
 def build_ghl_payload(customer):
@@ -160,6 +182,15 @@ def main():
     svc_counts = collections.Counter()   # per-tag totals, for verification
     pest_not_mosquito = 0
 
+    print("\nFetching subscriptions (all active + inactive rodent baiting)...")
+    try:
+        subs_map = build_subscription_map(fr)
+        total_subs = sum(len(v) for v in subs_map.values())
+        print(f"  {len(subs_map):,} customers have subscriptions ({total_subs:,} subs)")
+    except Exception as e:
+        print(f"  WARNING: subscription fetch failed ({e}); service tags skipped this run")
+        subs_map = {}
+
     for i in range(0, len(customer_ids), 100):
         batch = customer_ids[i : i + 100]
         try:
@@ -168,12 +199,6 @@ def main():
             print(f"  ERROR fetching batch: {e}")
             stats["errors"] += len(batch)
             continue
-
-        try:
-            subs_map = subs_by_customer(fr, batch)
-        except Exception as e:
-            print(f"  WARNING: subscription fetch failed for batch ({e}); no service tags this batch")
-            subs_map = {}
 
         for customer in customers:
             if not fr.is_real_record(customer):
