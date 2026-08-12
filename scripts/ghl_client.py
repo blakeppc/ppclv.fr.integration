@@ -131,7 +131,12 @@ class GHLClient:
             existing = self.find_by_phone(payload.get("phone"))
 
         if existing:
-            preserved = [t for t in existing.get("tags", []) if t not in self.FR_STATUS_TAGS]
+            # Drop the tags this sync manages (fr status + svc_* service tags) so they
+            # reflect the CURRENT state; preserve everything else (manual tags, price
+            # increase flags, etc.). svc_* are recomputed fresh from active subscriptions,
+            # so a dropped service loses its tag.
+            preserved = [t for t in existing.get("tags", [])
+                         if t not in self.FR_STATUS_TAGS and not t.startswith("svc_")]
             new_tags = payload.get("tags", [])
             payload["tags"] = list(dict.fromkeys(preserved + new_tags))
             updated = self.update_contact(existing["id"], payload)
